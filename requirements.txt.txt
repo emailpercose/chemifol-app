@@ -1,4 +1,5 @@
 streamlit
 pandas
-openpyxl
+streamlit-gsheets
 streamlit-js-eval
+openpyxl

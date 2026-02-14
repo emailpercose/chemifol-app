@@ -59,7 +59,8 @@ conn = st.connection("gsheets", type=GSheetsConnection)
 def get_df(sheet_name):
     """Legge una scheda e pulisce le righe vuote"""
     try:
-        df = conn.read(worksheet=sheet_name, ttl=0)
+        # ttl=5 evita l'errore 429 (troppe richieste)
+        df = conn.read(worksheet=sheet_name, ttl=5)
         df = df.dropna(how='all')
         # Pulisce i nomi delle colonne da spazi accidentali
         df.columns = df.columns.str.strip()
@@ -82,30 +83,23 @@ def get_next_id(df):
     df['id'] = pd.to_numeric(df['id'], errors='coerce').fillna(0)
     return int(df['id'].max()) + 1
 
-# --- UTILITY FOTO (Conversione Base64) ---
+# --- UTILITY FOTO (Base64) ---
 def process_image(img_file):
-    """Converte l'immagine caricata in una stringa Base64 compressa"""
-    if img_file is None:
-        return ""
+    """Converte foto in testo compresso per Google Sheets"""
+    if img_file is None: return ""
     try:
         img = Image.open(img_file)
-        # Ridimensiona l'immagine per non appesantire troppo il foglio (Max 800px)
-        img.thumbnail((800, 800))
+        # Ridimensiona a 600px per risparmiare spazio nel foglio
+        img.thumbnail((600, 600)) 
         buffered = BytesIO()
-        # Salva in JPEG compresso
-        img.save(buffered, format="JPEG", quality=70)
-        img_str = base64.b64encode(buffered.getvalue()).decode()
-        return img_str
-    except Exception as e:
-        st.error(f"Errore elaborazione foto: {e}")
-        return ""
+        img.save(buffered, format="JPEG", quality=50) # Qualità media per velocità
+        return base64.b64encode(buffered.getvalue()).decode()
+    except: return ""
 
 def decode_image(img_str):
-    """Decodifica la stringa Base64 in immagine"""
-    try:
-        return base64.b64decode(img_str)
-    except:
-        return None
+    """Legge il testo e lo fa tornare foto"""
+    try: return base64.b64decode(img_str)
+    except: return None
 
 # --- UTILITY DI LETTURA ---
 def get_all_cantieri():
@@ -424,15 +418,14 @@ else:
                         with st.container():
                             st.markdown(f"<div class='issue-card'><b>📍 {r['location']}</b> | 👷 {r['username']}<br>📅 {r['timestamp']}<br><br>📝 {r['description']}</div>", unsafe_allow_html=True)
                             
-                            # --- VISUALIZZAZIONE FOTO (Se presente) ---
+                            # --- VISUALIZZATORE FOTO ADMIN ---
                             if 'image' in r and pd.notna(r['image']) and len(str(r['image'])) > 100:
                                 try:
                                     img_data = decode_image(r['image'])
                                     if img_data:
-                                        st.image(img_data, width=300, caption="Foto dal cantiere")
-                                except:
-                                    st.warning("Impossibile caricare la foto.")
-                            # ------------------------------------------
+                                        st.image(img_data, width=300, caption="📸 Foto dal cantiere")
+                                except: st.error("Errore caricamento foto")
+                            # ---------------------------------
 
                             if st.button("✅ RISOLVI", key=f"s_{r['id']}"):
                                 df_all = get_df("issues")
@@ -447,13 +440,13 @@ else:
                         with st.expander(f"✅ {r['timestamp']} - {r['username']} @ {r['location']}"):
                             st.write(f"**Descrizione:** {r['description']}")
                             
-                            # --- FOTO ARCHIVIO ---
+                            # --- VISUALIZZATORE FOTO ARCHIVIO ---
                             if 'image' in r and pd.notna(r['image']) and len(str(r['image'])) > 100:
                                 try:
                                     img_data = decode_image(r['image'])
                                     if img_data: st.image(img_data, width=200)
                                 except: pass
-                            # ---------------------
+                            # ------------------------------------
 
                             if st.button("ELIMINA DEFINITIVAMENTE ❌", key=f"del_arch_{r['id']}"):
                                 df_all = get_df("issues")
@@ -519,6 +512,12 @@ else:
                 df['start_time'] = pd.to_datetime(df['start_time'])
                 df['end_time'] = pd.to_datetime(df['end_time'])
                 df['Ore'] = ((df['end_time'] - df['start_time']).dt.total_seconds() / 3600).round(2)
+                
+                # --- DOWNLOAD BUTTON AGGIUNTO ---
+                csv = df.to_csv(index=False).encode('utf-8')
+                st.download_button("📥 SCARICA EXCEL (CSV)", data=csv, file_name="report_ore.csv", mime='text/csv')
+                # --------------------------------
+
                 if filter_mode == "Mese":
                     fm = c3.selectbox("Seleziona Mese", df['start_time'].dt.strftime('%m-%Y').unique(), key="rm")
                     df = df[df['start_time'].dt.strftime('%m-%Y') == fm]
@@ -527,12 +526,6 @@ else:
                     df = df[df['start_time'].dt.date == fd]
                 if fu != "TUTTI": df = df[df['username'] == fu]
                 if fl != "TUTTE": df = df[df['location'] == fl]
-                
-                # --- TASTO DOWNLOAD EXCEL ---
-                csv = df.to_csv(index=False).encode('utf-8')
-                st.download_button("📥 SCARICA REPORT (Excel/CSV)", data=csv, file_name="report_ore.csv", mime='text/csv')
-                # ----------------------------
-
                 st.markdown("""<table class='report-table'><tr><th>CHI</th><th>DOVE</th><th>DATA</th><th>ORARI</th><th>ORE</th><th>DEL</th></tr>""", unsafe_allow_html=True)
                 for _, r in df.iterrows():
                     c_1, c_2, c_3, c_4, c_5, c_6 = st.columns([2,2,1,2,1,1])
@@ -693,12 +686,12 @@ else:
                 st.markdown("### ⚠️ Segnala Problema")
                 with st.expander("Apri modulo segnalazione"):
                     d = st.text_area("Descrizione")
-                    # --- MODIFICA FOTO ATTIVA ---
-                    img_file = st.camera_input("Scatta una foto del problema")
+                    # --- SCATTA FOTO ---
+                    img_file = st.camera_input("Scatta una foto")
                     
                     if st.button("INVIA SEGNALAZIONE"):
                         if d or img_file:
-                            # Converte foto in testo
+                            # Processa immagine se presente
                             img_str = process_image(img_file)
                             
                             df_i = get_df("issues")
@@ -708,14 +701,14 @@ else:
                                 "location": active['location'], 
                                 "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), 
                                 "status": "APERTA", 
-                                "image": img_str,  # Salva la foto
+                                "image": img_str, # Salva la foto codificata
                                 "visto": 0
                             }])
                             df_i = pd.concat([df_i, new_row], ignore_index=True)
                             update_df("issues", df_i)
-                            st.success("Inviata con FOTO!")
-                        else: st.error("Inserisci una descrizione o scatta una foto.")
-                    # -----------------------------
+                            st.success("Inviata!")
+                        else: st.error("Scrivi qualcosa o fai una foto.")
+                    # -------------------
             else:
                 st.markdown("<div class='stBlock'>", unsafe_allow_html=True)
                 st.subheader("🟩 Inizia Turno")

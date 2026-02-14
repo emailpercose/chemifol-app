@@ -1,4 +1,7 @@
 streamlit
 pandas
-streamlit-gsheets
+st-gsheets-connection
 streamlit-js-eval
+gspread
+openpyxl
+numpy

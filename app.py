@@ -57,8 +57,9 @@ def get_df(sheet_name):
     """Legge una scheda e pulisce le righe vuote"""
     try:
         df = conn.read(worksheet=sheet_name, ttl=0)
-        # Rimuove righe completamente vuote
         df = df.dropna(how='all')
+        # Pulisce i nomi delle colonne da spazi accidentali
+        df.columns = df.columns.str.strip()
         return df
     except Exception as e:
         return pd.DataFrame() 
@@ -75,7 +76,6 @@ def get_next_id(df):
     """Calcola il prossimo ID"""
     if df.empty or 'id' not in df.columns:
         return 1
-    # Assicura che la colonna id sia numerica
     df['id'] = pd.to_numeric(df['id'], errors='coerce').fillna(0)
     return int(df['id'].max()) + 1
 
@@ -83,7 +83,6 @@ def get_next_id(df):
 def get_all_cantieri():
     df = get_df("cantieri")
     if not df.empty and 'attivo' in df.columns:
-        # Filtra solo quelli attivi (1)
         return sorted(df[df['attivo'] == 1]['nome_cantiere'].astype(str).unique().tolist())
     elif not df.empty and 'nome_cantiere' in df.columns:
         return sorted(df['nome_cantiere'].astype(str).unique().tolist())
@@ -110,7 +109,7 @@ if 'msg_feedback' not in st.session_state: st.session_state.msg_feedback = None
 # ==============================================================================
 
 if not st.session_state.user:
-    # --- LOGIN ---
+    # --- LOGIN MODIFICATO E BLINDATO ---
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
         st.markdown("<div class='stBlock'>", unsafe_allow_html=True)
@@ -118,17 +117,25 @@ if not st.session_state.user:
         with st.form("login_frm"):
             u = st.text_input("Username").strip()
             p = st.text_input("Password", type="password")
-            if st.form_submit_button("ENTRA"):
+            submitted = st.form_submit_button("ENTRA")
+            
+            if submitted:
                 users = get_df("users")
                 if users.empty:
-                    st.error("Errore connessione database utenti.")
+                    st.error("Errore: Il foglio 'users' è vuoto o non raggiungibile.")
                 else:
-                    # Filtra utente
-                    usr = users[(users['username'].astype(str).str.lower() == u.lower()) & (users['password'].astype(str) == p)]
+                    # PULIZIA DATI (Rimuove spazi vuoti invisibili)
+                    users['username'] = users['username'].astype(str).str.strip().str.lower()
+                    users['password'] = users['password'].astype(str).str.strip()
+                    
+                    # Cerca utente
+                    u_clean = u.strip().lower()
+                    p_clean = p.strip()
+                    
+                    usr = users[(users['username'] == u_clean) & (users['password'] == p_clean)]
                     
                     if not usr.empty:
                         user_data = usr.iloc[0]
-                        # Ordine tupla: username, password, role, nome_completo, pwd_changed
                         st.session_state.user = (
                             user_data['username'], 
                             user_data['password'], 
@@ -137,7 +144,13 @@ if not st.session_state.user:
                             int(user_data['pwd_changed']) if 'pwd_changed' in user_data else 0
                         )
                         st.rerun()
-                    else: st.error("Dati errati.")
+                    else: 
+                        st.error("Dati errati.")
+                        # DEBUG NASCOSTO (Espandi per vedere cosa c'è nel foglio se non entri)
+                        with st.expander("🛠️ Debug (Se non riesci a entrare)"):
+                            st.write("Dati letti dal foglio (Verifica se coincidono):")
+                            st.dataframe(users[['username', 'password']])
+
         st.markdown("</div>", unsafe_allow_html=True)
 
 else:
@@ -154,6 +167,9 @@ else:
             if st.form_submit_button("SALVA E ACCEDI"):
                 if p1 and p1 == p2:
                     users = get_df("users")
+                    # Pulizia per sicurezza
+                    users['username'] = users['username'].astype(str).str.strip().str.lower()
+                    
                     users.loc[users['username'] == u_curr, 'password'] = p1
                     users.loc[users['username'] == u_curr, 'pwd_changed'] = 1
                     update_df("users", users)
@@ -172,7 +188,6 @@ else:
             st.markdown(f"## 👷 {name_curr}")
             st.divider()
             
-            # Conta notifiche
             df_logs = get_df("logs")
             n_log = len(df_logs[df_logs['visto'] == 0]) if not df_logs.empty and 'visto' in df_logs.columns else 0
             
@@ -182,7 +197,6 @@ else:
             df_mat = get_df("material_requests")
             n_mat = len(df_mat[(df_mat['visto'] == 0) & (df_mat['status'] == 'PENDING')]) if not df_mat.empty and 'visto' in df_mat.columns else 0
             
-            # Voci Menu
             m_bach = "📢 Bacheca & News"
             m_mat = f"📦 Richiesta Materiale ({n_mat})" if n_mat > 0 else "📦 Richiesta Materiale"
             m_gest = "👥 Staff & Cantieri"
@@ -200,7 +214,6 @@ else:
             st.success(st.session_state.msg_feedback)
             st.session_state.msg_feedback = None
 
-        # --- ADMIN: BACHECA ---
         if choice == m_bach:
             st.title("📢 Bacheca Aziendale")
             st.markdown("<div class='stBlock'>", unsafe_allow_html=True)
@@ -214,7 +227,6 @@ else:
                 if titolo and msg and destinatari_sel:
                     dest_str = "TUTTI" if "TUTTI" in destinatari_sel else ",".join(destinatari_sel)
                     scad = datetime.now() + timedelta(days=durata)
-                    
                     df_b = get_df("bacheca")
                     new_id = get_next_id(df_b)
                     new_row = pd.DataFrame([{
@@ -225,17 +237,14 @@ else:
                     }])
                     df_b = pd.concat([df_b, new_row], ignore_index=True)
                     update_df("bacheca", df_b)
-                    
                     st.success("Pubblicato!"); st.rerun()
                 else: st.error("Compila tutti i campi.")
             st.divider()
             st.subheader("Annunci Attivi")
             anns = get_df("bacheca")
             if not anns.empty:
-                # Filtro scadenza
                 anns['data_scadenza'] = pd.to_datetime(anns['data_scadenza'])
                 anns = anns[anns['data_scadenza'] > datetime.now()].sort_values('data_pubblicazione', ascending=False)
-                
                 for _, a in anns.iterrows():
                     st.info(f"[{a['destinatario']}] **{a['titolo']}**: {a['messaggio']} (Scade: {a['data_scadenza']})")
                     if st.button(f"Elimina {a['id']}", key=f"del_{a['id']}"): 
@@ -245,10 +254,8 @@ else:
                         st.rerun()
             st.markdown("</div>", unsafe_allow_html=True)
 
-        # --- ADMIN: RICHIESTA MATERIALE ---
         elif choice == m_mat:
             st.title("📦 Richieste Materiale")
-            # Segna come letti
             if n_mat > 0:
                 df_m = get_df("material_requests")
                 df_m.loc[df_m['visto'] == 0, 'visto'] = 1
@@ -260,25 +267,17 @@ else:
                 st.markdown("<div class='stBlock'>", unsafe_allow_html=True)
                 cantieri_list = ["TUTTI"] + get_all_cantieri()
                 filter_loc = st.selectbox("📍 Filtra per Postazione/Cantiere:", cantieri_list)
-                
                 df_reqs = get_df("material_requests")
                 if not df_reqs.empty:
                     df_reqs = df_reqs[df_reqs['status'] == 'PENDING']
                     if filter_loc != "TUTTI":
                         df_reqs = df_reqs[df_reqs['location'] == filter_loc]
                     df_reqs = df_reqs.sort_values('request_date', ascending=False)
-
                     st.write(f"Trovate **{len(df_reqs)}** richieste.")
                     for _, r in df_reqs.iterrows():
                         loc_display = r['location'] if pd.notna(r['location']) else "Nessuna postazione"
                         with st.container():
-                            st.markdown(f"""
-                            <div class='req-card'>
-                                <b>👷 {r['username']}</b> presso <b>📍 {loc_display}</b><br>
-                                📅 {r['request_date']}<br>
-                                <hr style='margin:5px 0'>
-                                🛒 <b>Lista:</b><br>{r['item_list']}
-                            </div>""", unsafe_allow_html=True)
+                            st.markdown(f"""<div class='req-card'><b>👷 {r['username']}</b> presso <b>📍 {loc_display}</b><br>📅 {r['request_date']}<br><hr style='margin:5px 0'>🛒 <b>Lista:</b><br>{r['item_list']}</div>""", unsafe_allow_html=True)
                             if st.button("✅ SEGNA COME FORNITO", key=f"mat_ok_{r['id']}"):
                                 df_all = get_df("material_requests")
                                 df_all.loc[df_all['id'] == r['id'], 'status'] = 'ARCHIVED'
@@ -287,8 +286,7 @@ else:
                                 st.rerun()
                 else: st.info("Nessuna richiesta.")
                 st.markdown("</div>", unsafe_allow_html=True)
-            
-            else: # ARCHIVIO
+            else:
                 st.markdown("<div class='stBlock'>", unsafe_allow_html=True)
                 df_arch = get_df("material_requests")
                 if not df_arch.empty:
@@ -304,7 +302,6 @@ else:
                                 st.rerun()
                 st.markdown("</div>", unsafe_allow_html=True)
 
-        # --- ADMIN: STAFF & CANTIERI ---
         elif choice == m_gest:
             st.title("👥 Gestione Risorse")
             tab_res, tab_loc, tab_ass = st.tabs(["➕ Dipendente", "🏗️ Cantiere", "🔗 Assegnazioni"])
@@ -331,8 +328,6 @@ else:
                     df_u = get_df("users")
                     df_u = df_u[df_u['username'] != u_del]
                     update_df("users", df_u)
-                    
-                    # Elimina anche assegnazioni
                     df_ass = get_df("assignments")
                     df_ass = df_ass[df_ass['username'] != u_del]
                     update_df("assignments", df_ass)
@@ -357,7 +352,6 @@ else:
                     df_c = get_df("cantieri")
                     df_c = df_c[df_c['nome_cantiere'] != c_del]
                     update_df("cantieri", df_c)
-                    
                     df_ass = get_df("assignments")
                     df_ass = df_ass[df_ass['location'] != c_del]
                     update_df("assignments", df_ass)
@@ -371,13 +365,10 @@ else:
                 curr_ass = []
                 if not df_ass.empty and not df_ass[df_ass['username'] == su].empty:
                     curr_ass = df_ass[df_ass['username'] == su]['location'].tolist()
-                
                 na = st.multiselect("Assegna", get_all_cantieri(), default=curr_ass)
                 if st.button("SALVA ASSEGNAZIONI"):
-                    # Rimuovi vecchie
                     if not df_ass.empty:
                         df_ass = df_ass[df_ass['username'] != su]
-                    # Aggiungi nuove
                     new_rows = []
                     for l in na:
                         new_rows.append({"username": su, "location": l})
@@ -387,17 +378,14 @@ else:
                     st.success("Salvato.")
                 st.markdown("</div>", unsafe_allow_html=True)
 
-        # --- ADMIN: SEGNALAZIONI ---
         elif choice == m_seg:
             st.title("⚠️ Segnalazioni")
             if n_iss > 0:
                 df_i = get_df("issues")
                 df_i.loc[df_i['visto'] == 0, 'visto'] = 1
                 update_df("issues", df_i)
-            
             mode = st.radio("Vista:", ["APERTE (Da Lavorare)", "RISOLTE (Archivio)"], horizontal=True)
             df_iss = get_df("issues")
-            
             if mode == "APERTE (Da Lavorare)":
                 if not df_iss.empty:
                     df_iss = df_iss[df_iss['status'] == 'APERTA'].sort_values('timestamp', ascending=False)
@@ -409,7 +397,7 @@ else:
                                 df_all.loc[df_all['id'] == r['id'], 'status'] = 'RISOLTO'
                                 update_df("issues", df_all)
                                 st.rerun()
-            else: # RISOLTE
+            else:
                 st.markdown("<div class='stBlock'>", unsafe_allow_html=True)
                 if not df_iss.empty:
                     df_iss = df_iss[df_iss['status'] == 'RISOLTO'].sort_values('timestamp', ascending=False)
@@ -423,49 +411,41 @@ else:
                                 st.rerun()
                 st.markdown("</div>", unsafe_allow_html=True)
 
-        # --- ADMIN: MAPPE ---
         elif choice == m_map:
             st.title("🗺️ Tracciamento GPS")
             if n_log > 0:
                 df_l = get_df("logs")
                 df_l.loc[df_l['visto'] == 0, 'visto'] = 1
                 update_df("logs", df_l)
-            
             st.markdown("<div class='stBlock'>", unsafe_allow_html=True)
             c1, c2, c3 = st.columns(3)
             fu = c1.selectbox("Utente", ["TUTTI"] + get_all_staff())
             fl = c2.selectbox("Luogo", ["TUTTE"] + get_all_cantieri())
             fd = c3.date_input("Data Specifica", value=datetime.now())
-            
             df = get_df("logs")
             if not df.empty:
                 df = df[df['gps_lat'] != 0]
                 if fu != "TUTTI": df = df[df['username'] == fu]
                 if fl != "TUTTE": df = df[df['location'] == fl]
-                
                 df['start_time'] = pd.to_datetime(df['start_time'])
                 df = df[df['start_time'].dt.date == fd].sort_values('start_time', ascending=False)
-                
                 if not df.empty:
                     for _, r in df.iterrows():
                         o_in = r['start_time'].strftime('%H:%M')
                         o_out = "IN CORSO"
                         if pd.notna(r['end_time']):
                             o_out = pd.to_datetime(r['end_time']).strftime('%H:%M')
-                        
                         with st.expander(f"📍 {r['username']} @ {r['location']} ({o_in} - {o_out})"):
                             ci, co = st.columns(2)
                             try:
                                 ci.success(f"🟢 IN: {o_in}")
                                 ci.map(pd.DataFrame({'latitude': [float(r['gps_lat'])], 'longitude': [float(r['gps_lon'])]}), zoom=15)
                             except: ci.error("Err GPS")
-                            
                             if pd.notna(r['end_time']):
                                 try:
                                     co.error(f"🔴 OUT: {o_out}")
                                     co.map(pd.DataFrame({'latitude': [float(r['gps_lat_out'])], 'longitude': [float(r['gps_lon_out'])]}), zoom=15)
                                 except: pass
-                            
                             if st.button(f"Elimina {r['id']} ❌", key=f"dm_{r['id']}"):
                                 df_all = get_df("logs")
                                 df_all = df_all[df_all['id'] != r['id']]
@@ -474,7 +454,6 @@ else:
                 else: st.info("Nessun percorso trovato.")
             st.markdown("</div>", unsafe_allow_html=True)
 
-        # --- ADMIN: REPORT ---
         elif choice == m_rep:
             st.title("📊 Report Ore")
             st.markdown("<div class='stBlock'>", unsafe_allow_html=True)
@@ -483,24 +462,20 @@ else:
             c1, c2, c3 = st.columns(3)
             fu = c1.selectbox("Dipendente", ["TUTTI"] + get_all_staff(), key="ru")
             fl = c2.selectbox("Postazione", ["TUTTE"] + get_all_cantieri(), key="rl")
-            
             df = get_df("logs")
             if not df.empty:
                 df = df[pd.notna(df['end_time'])].copy()
                 df['start_time'] = pd.to_datetime(df['start_time'])
                 df['end_time'] = pd.to_datetime(df['end_time'])
                 df['Ore'] = ((df['end_time'] - df['start_time']).dt.total_seconds() / 3600).round(2)
-                
                 if filter_mode == "Mese":
                     fm = c3.selectbox("Seleziona Mese", df['start_time'].dt.strftime('%m-%Y').unique(), key="rm")
                     df = df[df['start_time'].dt.strftime('%m-%Y') == fm]
                 else:
                     fd = c3.date_input("Seleziona Giorno", value=datetime.now())
                     df = df[df['start_time'].dt.date == fd]
-                
                 if fu != "TUTTI": df = df[df['username'] == fu]
                 if fl != "TUTTE": df = df[df['location'] == fl]
-                
                 st.markdown("""<table class='report-table'><tr><th>CHI</th><th>DOVE</th><th>DATA</th><th>ORARI</th><th>ORE</th><th>DEL</th></tr>""", unsafe_allow_html=True)
                 for _, r in df.iterrows():
                     c_1, c_2, c_3, c_4, c_5, c_6 = st.columns([2,2,1,2,1,1])
@@ -516,7 +491,6 @@ else:
                 st.success(f"TOTALE: {df['Ore'].sum():.2f} ore")
             st.markdown("</div>", unsafe_allow_html=True)
 
-        # --- ADMIN: CALENDARIO ---
         elif choice == m_cal:
             st.title("🗓️ Matrice")
             st.markdown("<div class='stBlock'>", unsafe_allow_html=True)
@@ -537,7 +511,6 @@ else:
             else: st.info("Nessun dato.")
             st.markdown("</div>", unsafe_allow_html=True)
 
-        # --- ADMIN: SICUREZZA ---
         elif choice == m_sec:
             st.title("🔐 Sicurezza")
             st.markdown("<div class='stBlock'>", unsafe_allow_html=True)
@@ -570,7 +543,6 @@ else:
             st.divider(); 
             if st.button("Logout"): st.session_state.user = None; st.rerun()
 
-        # --- DIPENDENTE: BACHECA ---
         if menu_emp == "📢 Bacheca":
             st.title("📢 Bacheca Comunicazioni")
             anns = get_df("bacheca")
@@ -586,14 +558,12 @@ else:
                 if not found: st.info("Nessun avviso.")
             else: st.info("Nessun avviso.")
 
-        # --- DIPENDENTE: RICHIESTA MATERIALE ---
         elif menu_emp == "📦 Richiesta Materiale":
             st.title("📦 Richiesta Prodotti/Materiale")
             st.markdown("<div class='stBlock'>", unsafe_allow_html=True)
             st.info("Usa questo modulo per richiedere prodotti, DPI o attrezzatura all'amministrazione.")
             
             with st.form("req_form"):
-                # Recupera location assegnate
                 df_ass = get_df("assignments")
                 locs_avail = []
                 if not df_ass.empty:
@@ -633,16 +603,11 @@ else:
                     st.text(r['item_list'])
                     st.divider()
 
-        # --- DIPENDENTE: TIMBRATORE ---
         elif menu_emp == "📍 Timbratore":
             st.title("📍 Gestione Turno")
             df_logs = get_df("logs")
-            
-            # Cerca log attivo
             active = None
             if not df_logs.empty:
-                # Trova record dell'utente corrente senza end_time
-                # Attenzione: i valori vuoti su sheets possono essere NaN, None o stringa vuota
                 active_logs = df_logs[
                     (df_logs['username'] == u_curr) & 
                     (df_logs['end_time'].isna() | (df_logs['end_time'] == ""))
@@ -655,10 +620,7 @@ else:
                 st.success(f"SEI A: **{active['location']}**")
                 st.write(f"Dalle: {active['start_time']}")
                 st.subheader("🔴 Termina Turno")
-                
-                # Geolocation deve essere fuori dal pulsante
                 loc_out = get_geolocation(component_key="out_geo")
-                
                 if st.button("TIMBRA USCITA"):
                     if loc_out and 'coords' in loc_out:
                         df_logs.loc[df_logs['id'] == active['id'], 'end_time'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -674,7 +636,6 @@ else:
                 st.markdown("### ⚠️ Segnala Problema")
                 with st.expander("Apri modulo segnalazione"):
                     d = st.text_area("Descrizione")
-                    # Nota: l'upload immagini è complesso su Sheets, qui salviamo solo il testo per stabilità
                     st.caption("Nota: Foto temporaneamente disabilitate in questa versione")
                     if st.button("INVIA SEGNALAZIONE"):
                         df_i = get_df("issues")

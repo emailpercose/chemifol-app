@@ -2,6 +2,4 @@ streamlit
 pandas
 st-gsheets-connection
 streamlit-js-eval
-gspread
-openpyxl
-numpy
+Pillow

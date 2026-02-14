@@ -8,7 +8,9 @@ import time
 from PIL import Image
 import io
 
-# --- CONFIGURAZIONE SISTEMA ---
+# ==============================================================================
+# 1. CONFIGURAZIONE E STILE
+# ==============================================================================
 st.set_page_config(
     page_title="Chemifol Enterprise DB", 
     page_icon="🏗️", 
@@ -16,7 +18,6 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# --- CSS STILE ---
 st.markdown("""
     <style>
     .stApp { background-color: #f4f6f9; font-family: 'Segoe UI', sans-serif; }
@@ -52,7 +53,9 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- MOTORE SUPABASE ---
+# ==============================================================================
+# 2. CONNESSIONE SUPABASE E FUNZIONI
+# ==============================================================================
 @st.cache_resource
 def init_connection():
     try:
@@ -60,13 +63,13 @@ def init_connection():
         key = st.secrets["supabase"]["key"]
         return create_client(url, key)
     except:
-        st.error("⚠️ Errore Secrets: Manca URL o KEY di Supabase.")
+        st.error("⚠️ Errore Secrets: Configura URL e KEY su Streamlit Cloud.")
         return None
 
 supabase = init_connection()
 
-# --- FUNZIONI DATABASE ---
 def get_df(table_name):
+    """Scarica dati dal database gestendo tabelle vuote"""
     if not supabase: return pd.DataFrame()
     try:
         response = supabase.table(table_name).select("*").execute()
@@ -75,8 +78,8 @@ def get_df(table_name):
     except:
         return pd.DataFrame()
 
-# --- GESTIONE FOTO (STORAGE) ---
 def upload_photo(file):
+    """Carica foto nel Bucket e restituisce il Link"""
     if not file or not supabase: return None
     try:
         file_name = f"{int(time.time())}_{file.name}"
@@ -87,7 +90,6 @@ def upload_photo(file):
         st.error(f"Errore caricamento foto: {e}")
         return None
 
-# --- UTILITY ---
 def get_all_cantieri():
     df = get_df("cantieri")
     if not df.empty and 'attivo' in df.columns:
@@ -102,21 +104,23 @@ def get_all_staff():
         return df[df['role'] == 'user']['username'].unique().tolist()
     return []
 
-# --- LOGO ---
+# --- INIT SESSIONE ---
+if 'user' not in st.session_state: st.session_state.user = None
+if 'msg_feedback' not in st.session_state: st.session_state.msg_feedback = None
+
+# Gestione Logo
 if os.path.exists("logo.png"):
     c_logo, _ = st.columns([1, 4])
     with c_logo: st.image("logo.png", width=250)
 else:
     st.markdown("<h1 style='text-align: center; color: #2e7d32;'>CHEMIFOL DB SYSTEM</h1>", unsafe_allow_html=True)
 
-if 'user' not in st.session_state: st.session_state.user = None
-if 'msg_feedback' not in st.session_state: st.session_state.msg_feedback = None
-
 # ==============================================================================
-#                               LOGICA PRINCIPALE
+# 3. LOGICA PRINCIPALE (LOGIN & NAVIGAZIONE)
 # ==============================================================================
 
 if not st.session_state.user:
+    # --- LOGIN SCREEN ---
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
         st.markdown("<div class='stBlock'>", unsafe_allow_html=True)
@@ -138,9 +142,10 @@ if not st.session_state.user:
         st.markdown("</div>", unsafe_allow_html=True)
 
 else:
+    # --- UTENTE LOGGATO ---
     u_curr, p_curr, role_curr, name_curr, pwd_chg = st.session_state.user
     
-    # Cambio password obbligatorio
+    # Check Cambio Password Obbligatorio
     if role_curr == 'user' and pwd_chg == 0:
         st.warning(f"👋 Benvenuto, {name_curr}. Al primo accesso è obbligatorio cambiare la password.")
         st.markdown("<div class='stBlock'>", unsafe_allow_html=True)
@@ -153,17 +158,20 @@ else:
                         supabase.table("users").update({"password": p1, "pwd_changed": 1}).eq("username", u_curr).execute()
                         st.session_state.user = (u_curr, p1, role_curr, name_curr, 1)
                         st.success("Password aggiornata!"); time.sleep(1); st.rerun()
-                    except Exception as e: st.error(f"Errore: {e}")
+                    except Exception as e: st.error(f"Errore DB: {e}")
                 else: st.error("Le password non coincidono.")
         st.markdown("</div>", unsafe_allow_html=True)
         st.stop()
 
-    # --- ADMIN ---
+    # ------------------------------------------------------------------
+    # AREA ADMIN
+    # ------------------------------------------------------------------
     if role_curr == 'admin':
         with st.sidebar:
             st.markdown(f"## 👷 {name_curr}")
             st.divider()
             
+            # Conteggi notifiche
             df_logs = get_df("logs")
             n_log = len(df_logs[df_logs['visto'] == 0]) if not df_logs.empty and 'visto' in df_logs.columns else 0
             df_iss = get_df("issues")
@@ -171,6 +179,7 @@ else:
             df_mat = get_df("material_requests")
             n_mat = len(df_mat[(df_mat['visto'] == 0) & (df_mat['status'] == 'PENDING')]) if not df_mat.empty and 'visto' in df_mat.columns else 0
             
+            # Menu
             m_bach = "📢 Bacheca & News"
             m_mat = f"📦 Richiesta Materiale ({n_mat})" if n_mat > 0 else "📦 Richiesta Materiale"
             m_gest = "👥 Staff & Cantieri"
@@ -184,14 +193,16 @@ else:
             st.divider()
             if st.button("Esci"): st.session_state.user = None; st.rerun()
 
+        # Feedback Message Handler
         if st.session_state.msg_feedback:
             st.success(st.session_state.msg_feedback); st.session_state.msg_feedback = None
 
+        # --- ADMIN: BACHECA ---
         if choice == m_bach:
             st.title("📢 Bacheca Aziendale")
             st.markdown("<div class='stBlock'>", unsafe_allow_html=True)
             c1, c2 = st.columns([2, 1])
-            titolo = c1.text_input("Titolo Annuncio (Grassetto)")
+            titolo = c1.text_input("Titolo Annuncio")
             users = get_all_staff()
             destinatari_sel = c2.multiselect("Rivolto a:", ["TUTTI"] + users, default=["TUTTI"])
             msg = st.text_area("Messaggio")
@@ -207,7 +218,7 @@ else:
                             "data_scadenza": scad.isoformat()
                         }).execute()
                         st.success("Pubblicato!"); time.sleep(1); st.rerun()
-                    except Exception as e: st.error(f"Errore: {e}")
+                    except: st.error("Errore pubblicazione.")
                 else: st.error("Compila tutti i campi.")
             st.divider()
             st.subheader("Annunci Attivi")
@@ -217,10 +228,11 @@ else:
                 df_b = df_b[df_b['data_scadenza'] > datetime.now()].sort_values('data_pubblicazione', ascending=False)
                 for _, a in df_b.iterrows():
                     st.info(f"[{a['destinatario']}] **{a['titolo']}**: {a['messaggio']} (Scade: {a['data_scadenza'].strftime('%d/%m')})")
-                    if st.button(f"Elimina {a['id']}", key=f"del_b_{a['id']}"): 
+                    if st.button("🗑️", key=f"del_b_{a['id']}"): 
                         supabase.table("bacheca").delete().eq("id", a['id']).execute(); st.rerun()
             st.markdown("</div>", unsafe_allow_html=True)
 
+        # --- ADMIN: MATERIALI ---
         elif choice == m_mat:
             st.title("📦 Richieste Materiale")
             if n_mat > 0: supabase.table("material_requests").update({"visto": 1}).eq("visto", 0).execute()
@@ -242,7 +254,7 @@ else:
                             st.markdown(f"""<div class='req-card'><b>👷 {r['username']}</b> presso <b>📍 {loc_display}</b><br>📅 {r['request_date'][:10]}<br><hr style='margin:5px 0'>🛒 <b>Lista:</b><br>{r['item_list']}</div>""", unsafe_allow_html=True)
                             if st.button("✅ SEGNA COME FORNITO", key=f"mat_ok_{r['id']}"):
                                 supabase.table("material_requests").update({"status": "ARCHIVED"}).eq("id", r['id']).execute()
-                                st.session_state.msg_feedback = "Richiesta archiviata!"; st.rerun()
+                                st.session_state.msg_feedback = "Archiviata!"; st.rerun()
                 else: st.info("Nessuna richiesta.")
                 st.markdown("</div>", unsafe_allow_html=True)
             else:
@@ -258,6 +270,7 @@ else:
                                 supabase.table("material_requests").delete().eq("id", r['id']).execute(); st.rerun()
                 st.markdown("</div>", unsafe_allow_html=True)
 
+        # --- ADMIN: GESTIONE (Staff, Cantieri, Assegnazioni) ---
         elif choice == m_gest:
             st.title("👥 Gestione Risorse")
             tab_res, tab_loc, tab_ass = st.tabs(["➕ Dipendente", "🏗️ Cantiere", "🔗 Assegnazioni"])
@@ -270,23 +283,15 @@ else:
                 np = st.text_input("Password Iniziale", value="1234")
                 if st.button("CREA DIPENDENTE"):
                     try:
-                        # CORRETTO: Ho spostato il rerun per evitare falsi errori
                         supabase.table("users").insert({"username": nu.lower(), "password": np, "role": "user", "nome_completo": nn}).execute()
-                        st.success("Creato!")
-                        time.sleep(1)
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Errore (forse username esiste già?): {e}")
+                        st.success("Creato!"); time.sleep(1); st.rerun()
+                    except Exception as e: st.error(f"Errore (username esiste già?): {e}")
                 st.divider()
-                u_del = st.selectbox("Utente da eliminare", ["Seleziona..."] + get_all_staff())
-                if u_del != "Seleziona..." and st.button("ELIMINA DIPENDENTE ❌"):
-                    try:
-                        supabase.table("users").delete().eq("username", u_del).execute()
-                        supabase.table("assignments").delete().eq("username", u_del).execute()
-                        st.success("Eliminato.")
-                        time.sleep(1)
-                        st.rerun()
-                    except Exception as e: st.error(f"Errore: {e}")
+                u_del = st.selectbox("Utente da eliminare", ["..."] + get_all_staff())
+                if u_del != "..." and st.button("ELIMINA DIPENDENTE"):
+                    supabase.table("users").delete().eq("username", u_del).execute()
+                    supabase.table("assignments").delete().eq("username", u_del).execute()
+                    st.success("Eliminato."); time.sleep(1); st.rerun()
                 st.markdown("</div>", unsafe_allow_html=True)
 
             with tab_loc:
@@ -296,23 +301,30 @@ else:
                     try:
                         supabase.table("cantieri").insert({"nome_cantiere": nl, "attivo": 1}).execute()
                         st.success("Aggiunto!"); time.sleep(1); st.rerun()
-                    except Exception as e: st.error(f"Errore: {e}")
+                    except: st.error("Errore inserimento.")
                 st.divider()
-                c_del = st.selectbox("Cantiere da eliminare", ["Seleziona..."] + get_all_cantieri())
-                if c_del != "Seleziona..." and st.button("ELIMINA CANTIERE ❌"):
-                    try:
-                        supabase.table("cantieri").delete().eq("nome_cantiere", c_del).execute()
-                        supabase.table("assignments").delete().eq("location", c_del).execute()
-                        st.success("Eliminato."); time.sleep(1); st.rerun()
-                    except Exception as e: st.error(f"Errore: {e}")
+                c_del = st.selectbox("Cantiere da eliminare", ["..."] + get_all_cantieri())
+                if c_del != "..." and st.button("ELIMINA CANTIERE"):
+                    supabase.table("cantieri").delete().eq("nome_cantiere", c_del).execute()
+                    supabase.table("assignments").delete().eq("location", c_del).execute()
+                    st.success("Eliminato."); time.sleep(1); st.rerun()
                 st.markdown("</div>", unsafe_allow_html=True)
 
             with tab_ass:
                 st.markdown("<div class='stBlock'>", unsafe_allow_html=True)
                 su = st.selectbox("Dipendente", get_all_staff())
+                
+                # --- FIX ASSEGNAZIONI ---
                 df_ass = get_df("assignments")
-                curr_ass = df_ass[df_ass['username'] == su]['location'].tolist() if not df_ass.empty else []
-                na = st.multiselect("Assegna", get_all_cantieri(), default=curr_ass)
+                all_cantieri = get_all_cantieri()
+                curr_ass = []
+                
+                if not df_ass.empty and 'username' in df_ass.columns and 'location' in df_ass.columns:
+                    raw_ass = df_ass[df_ass['username'] == su]['location'].tolist()
+                    curr_ass = [c for c in raw_ass if c in all_cantieri]
+                
+                na = st.multiselect("Assegna", all_cantieri, default=curr_ass)
+                
                 if st.button("SALVA ASSEGNAZIONI"):
                     try:
                         supabase.table("assignments").delete().eq("username", su).execute()
@@ -323,21 +335,21 @@ else:
                     except Exception as e: st.error(f"Errore: {e}")
                 st.markdown("</div>", unsafe_allow_html=True)
 
+        # --- ADMIN: SEGNALAZIONI ---
         elif choice == m_seg:
             st.title("⚠️ Segnalazioni")
             if n_iss > 0: supabase.table("issues").update({"visto": 1}).eq("visto", 0).execute()
             
-            mode = st.radio("Vista:", ["APERTE (Da Lavorare)", "RISOLTE (Archivio)"], horizontal=True)
+            mode = st.radio("Vista:", ["APERTE", "RISOLTE"], horizontal=True)
             df_iss = get_df("issues")
             
-            if mode == "APERTE (Da Lavorare)":
+            if mode == "APERTE":
                 if not df_iss.empty:
                     df_iss = df_iss[df_iss['status'] == 'APERTA'].sort_values('timestamp', ascending=False)
                     for _, r in df_iss.iterrows():
                         with st.container():
                             st.markdown(f"<div class='issue-card'><b>📍 {r['location']}</b> | 👷 {r['username']}<br>📅 {r['timestamp'][:16]}<br><br>📝 {r['description']}</div>", unsafe_allow_html=True)
-                            if r.get('image_url'):
-                                st.image(r['image_url'], width=300, caption="📸 Foto Cantiere")
+                            if r.get('image_url'): st.image(r['image_url'], width=300, caption="📸 Foto Cantiere")
                             if st.button("✅ RISOLVI", key=f"s_{r['id']}"):
                                 supabase.table("issues").update({"status": "RISOLTO"}).eq("id", r['id']).execute()
                                 st.rerun()
@@ -349,10 +361,11 @@ else:
                         with st.expander(f"✅ {r['timestamp'][:10]} - {r['username']} @ {r['location']}"):
                             st.write(f"**Descrizione:** {r['description']}")
                             if r.get('image_url'): st.image(r['image_url'], width=200)
-                            if st.button("ELIMINA DEFINITIVAMENTE ❌", key=f"del_arch_{r['id']}"):
+                            if st.button("ELIMINA", key=f"del_arch_{r['id']}"):
                                 supabase.table("issues").delete().eq("id", r['id']).execute(); st.rerun()
                 st.markdown("</div>", unsafe_allow_html=True)
 
+        # --- ADMIN: GPS ---
         elif choice == m_map:
             st.title("🗺️ Tracciamento GPS")
             if n_log > 0: supabase.table("logs").update({"visto": 1}).eq("visto", 0).execute()
@@ -362,6 +375,7 @@ else:
             fu = c1.selectbox("Utente", ["TUTTI"] + get_all_staff())
             fl = c2.selectbox("Luogo", ["TUTTE"] + get_all_cantieri())
             fd = c3.date_input("Data Specifica", value=datetime.now())
+            
             df = get_df("logs")
             if not df.empty:
                 df = df[df['gps_lat'] != 0]
@@ -369,6 +383,7 @@ else:
                 if fl != "TUTTE": df = df[df['location'] == fl]
                 df['start_time'] = pd.to_datetime(df['start_time'])
                 df = df[df['start_time'].dt.date == fd].sort_values('start_time', ascending=False)
+                
                 if not df.empty:
                     for _, r in df.iterrows():
                         o_in = r['start_time'].strftime('%H:%M')
@@ -382,11 +397,12 @@ else:
                             if pd.notna(r['end_time']):
                                 co.error(f"🔴 OUT: {o_out}")
                                 co.map(pd.DataFrame({'latitude': [float(r['gps_lat_out'])], 'longitude': [float(r['gps_lon_out'])]}), zoom=15)
-                            if st.button(f"Elimina {r['id']} ❌", key=f"dm_{r['id']}"):
+                            if st.button(f"Elimina Log", key=f"dm_{r['id']}"):
                                 supabase.table("logs").delete().eq("id", r['id']).execute(); st.rerun()
                 else: st.info("Nessun percorso.")
             st.markdown("</div>", unsafe_allow_html=True)
 
+        # --- ADMIN: REPORT ORE ---
         elif choice == m_rep:
             st.title("📊 Report Ore")
             st.markdown("<div class='stBlock'>", unsafe_allow_html=True)
@@ -404,7 +420,7 @@ else:
                 df['Ore'] = ((df['end_time'] - df['start_time']).dt.total_seconds() / 3600).round(2)
                 
                 csv = df.to_csv(index=False).encode('utf-8')
-                st.download_button("📥 SCARICA EXCEL (CSV)", data=csv, file_name="report_ore.csv", mime='text/csv')
+                st.download_button("📥 SCARICA CSV", data=csv, file_name="report.csv", mime='text/csv')
 
                 if filter_mode == "Mese":
                     fm = c3.selectbox("Seleziona Mese", df['start_time'].dt.strftime('%m-%Y').unique(), key="rm")
@@ -428,6 +444,7 @@ else:
                 st.success(f"TOTALE: {df['Ore'].sum():.2f} ore")
             st.markdown("</div>", unsafe_allow_html=True)
 
+        # --- ADMIN: CALENDARIO ---
         elif choice == m_cal:
             st.title("🗓️ Matrice")
             st.markdown("<div class='stBlock'>", unsafe_allow_html=True)
@@ -446,27 +463,26 @@ else:
                     st.dataframe(piv, use_container_width=True)
             st.markdown("</div>", unsafe_allow_html=True)
 
+        # --- ADMIN: SICUREZZA ---
         elif choice == m_sec:
             st.title("🔐 Sicurezza")
             st.markdown("<div class='stBlock'>", unsafe_allow_html=True)
             st.subheader("Admin")
             nap = st.text_input("Nuova Password Admin", type="password")
             if st.button("CAMBIA"):
-                try:
-                    supabase.table("users").update({"password": nap}).eq("username", "mimmo").execute()
-                    st.success("OK")
-                except Exception as e: st.error(f"Errore: {e}")
+                supabase.table("users").update({"password": nap}).eq("username", "mimmo").execute()
+                st.success("OK")
             st.divider()
             st.subheader("Reset Staff")
             ur = st.selectbox("Dipendente", get_all_staff())
             if st.button("RESET A 1234"):
-                try:
-                    supabase.table("users").update({"password": "1234", "pwd_changed": 0}).eq("username", ur).execute()
-                    st.success("Fatto")
-                except Exception as e: st.error(f"Errore: {e}")
+                supabase.table("users").update({"password": "1234", "pwd_changed": 0}).eq("username", ur).execute()
+                st.success("Fatto")
             st.markdown("</div>", unsafe_allow_html=True)
 
-    # --- DIPENDENTE ---
+    # ------------------------------------------------------------------
+    # AREA DIPENDENTE
+    # ------------------------------------------------------------------
     else:
         with st.sidebar:
             if os.path.exists("logo.png"): st.image("logo.png", width=150)
@@ -475,6 +491,7 @@ else:
             st.divider()
             if st.button("Logout"): st.session_state.user = None; st.rerun()
 
+        # --- USER: BACHECA ---
         if menu_emp == "📢 Bacheca":
             st.title("📢 Bacheca Comunicazioni")
             anns = get_df("bacheca")
@@ -490,6 +507,7 @@ else:
                 if not found: st.info("Nessun avviso.")
             else: st.info("Nessun avviso.")
 
+        # --- USER: MATERIALI ---
         elif menu_emp == "📦 Richiesta Materiale":
             st.title("📦 Richiesta Prodotti/Materiale")
             st.markdown("<div class='stBlock'>", unsafe_allow_html=True)
@@ -497,20 +515,20 @@ else:
             
             with st.form("req_form"):
                 df_ass = get_df("assignments")
-                locs_avail = df_ass[df_ass['username'] == u_curr]['location'].tolist() if not df_ass.empty else []
+                locs_avail = []
+                if not df_ass.empty and 'username' in df_ass.columns:
+                    locs_avail = df_ass[df_ass['username'] == u_curr]['location'].tolist()
                 
                 if locs_avail:
                     sel_loc = st.selectbox("Per quale cantiere/postazione?", locs_avail)
                     txt_mat = st.text_area("Elenco materiale richiesto (Specifica quantità)", height=150)
                     if st.form_submit_button("INVIA RICHIESTA"):
                         if txt_mat and sel_loc:
-                            try:
-                                supabase.table("material_requests").insert({
-                                    "username": u_curr, "location": sel_loc, "item_list": txt_mat,
-                                    "request_date": datetime.now().isoformat(), "status": "PENDING", "visto": 0
-                                }).execute()
-                                st.success("Inviata!"); time.sleep(1); st.rerun()
-                            except Exception as e: st.error(f"Errore: {e}")
+                            supabase.table("material_requests").insert({
+                                "username": u_curr, "location": sel_loc, "item_list": txt_mat,
+                                "request_date": datetime.now().isoformat(), "status": "PENDING", "visto": 0
+                            }).execute()
+                            st.success("Inviata!"); time.sleep(1); st.rerun()
                         else: st.error("Compila tutto.")
                 else:
                     st.warning("Non hai cantieri assegnati.")
@@ -522,10 +540,11 @@ else:
             if not df_m.empty:
                 my_reqs = df_m[df_m['username'] == u_curr].sort_values('request_date', ascending=False).head(5)
                 for _, r in my_reqs.iterrows():
-                    status_icon = "⏳ IN ATTESA" if r['status'] == 'PENDING' else "✅ FORNITO/ARCHIVIATO"
+                    status_icon = "⏳ IN ATTESA" if r['status'] == 'PENDING' else "✅ FORNITO"
                     st.caption(f"{r['request_date'][:10]} - 📍 {r['location']} - {status_icon}")
                     st.text(r['item_list']); st.divider()
 
+        # --- USER: TIMBRATORE ---
         elif menu_emp == "📍 Timbratore":
             st.title("📍 Gestione Turno")
             df_logs = get_df("logs")
@@ -542,14 +561,12 @@ else:
                 loc_out = get_geolocation(component_key="out_geo")
                 if st.button("TIMBRA USCITA"):
                     if loc_out:
-                        try:
-                            supabase.table("logs").update({
-                                "end_time": datetime.now().isoformat(),
-                                "gps_lat_out": loc_out['coords']['latitude'],
-                                "gps_lon_out": loc_out['coords']['longitude'], "visto": 0
-                            }).eq("id", active['id']).execute()
-                            st.balloons(); time.sleep(1); st.rerun()
-                        except Exception as e: st.error(f"Errore: {e}")
+                        supabase.table("logs").update({
+                            "end_time": datetime.now().isoformat(),
+                            "gps_lat_out": loc_out['coords']['latitude'],
+                            "gps_lon_out": loc_out['coords']['longitude'], "visto": 0
+                        }).eq("id", active['id']).execute()
+                        st.balloons(); time.sleep(1); st.rerun()
                     else: st.error("Attendi GPS.")
                 st.markdown("</div>", unsafe_allow_html=True)
                 
@@ -560,35 +577,36 @@ else:
                     img_file = st.camera_input("Scatta una foto")
                     if st.button("INVIA SEGNALAZIONE"):
                         if d or img_file:
-                            try:
-                                url_foto = upload_photo(img_file)
-                                supabase.table("issues").insert({
-                                    "username": u_curr, "description": d, "location": active['location'],
-                                    "timestamp": datetime.now().isoformat(), "status": "APERTA",
-                                    "image_url": url_foto, "visto": 0
-                                }).execute()
-                                st.success("Inviata!"); time.sleep(1); st.rerun()
-                            except Exception as e: st.error(f"Errore: {e}")
+                            url_foto = upload_photo(img_file)
+                            supabase.table("issues").insert({
+                                "username": u_curr, "description": d, "location": active['location'],
+                                "timestamp": datetime.now().isoformat(), "status": "APERTA",
+                                "image_url": url_foto, "visto": 0
+                            }).execute()
+                            st.success("Inviata!"); time.sleep(1); st.rerun()
                         else: st.error("Scrivi qualcosa o fai una foto.")
             else:
                 st.markdown("<div class='stBlock'>", unsafe_allow_html=True)
                 st.subheader("🟩 Inizia Turno")
                 df_ass = get_df("assignments")
-                locs = df_ass[df_ass['username'] == u_curr]['location'].tolist() if not df_ass.empty else []
+                locs = []
+                if not df_ass.empty and 'username' in df_ass.columns:
+                    locs = df_ass[df_ass['username'] == u_curr]['location'].tolist()
+                
                 if locs:
                     sl = st.selectbox("Cantiere", locs)
                     lin = get_geolocation(component_key="in_geo")
                     if st.button("TIMBRA INGRESSO"):
                         if lin:
-                            try:
-                                supabase.table("logs").insert({
-                                    "username": u_curr, "location": sl,
-                                    "start_time": datetime.now().isoformat(),
-                                    "gps_lat": lin['coords']['latitude'],
-                                    "gps_lon": lin['coords']['longitude'], "visto": 0
-                                }).execute()
-                                st.rerun()
-                            except Exception as e: st.error(f"Errore: {e}")
+                            supabase.table("logs").insert({
+                                "username": u_curr, "location": sl,
+                                "start_time": datetime.now().isoformat(),
+                                "gps_lat": lin['coords']['latitude'],
+                                "gps_lon": lin['coords']['longitude'], "visto": 0
+                            }).execute()
+                            st.rerun()
                         else: st.error("Attendi GPS.")
                 else: st.warning("Non hai cantieri assegnati.")
                 st.markdown("</div>", unsafe_allow_html=True)
+
+# --- FINE PROGRAMMA ---

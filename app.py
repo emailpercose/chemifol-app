@@ -1,25 +1,3 @@
-Hai ragione Mimmo. Nel messaggio precedente ho cercato di sintetizzare per renderti il codice più leggero, ma se vuoi la **REPLICA ESATTA al 100%** di tutte le funzioni della versione Google Sheets (inclusi Calendario, Sicurezza, tutte le viste dei materiali, lo stile preciso delle card, ecc.) adattata a Supabase, allora serve il codice completo.
-
-Ecco il codice **DEFINITIVO e COMPLETO**. Include ogni singola funzione del tuo vecchio programma, ma con il motore **Supabase** (quindi veloce e con foto reali).
-
-### ⚠️ PRIMA DI INCOLLARE:
-
-Assicurati che nel file `requirements.txt` ci sia scritto:
-
-```text
-streamlit
-pandas
-supabase
-streamlit-js-eval
-Pillow
-
-```
-
-### 📋 CODICE COMPLETO `app.py`
-
-Copia tutto dall'inizio alla fine.
-
-```python
 import streamlit as st
 import pandas as pd
 from supabase import create_client, Client

@@ -2,3 +2,6 @@ streamlit
 pandas
 streamlit-gsheets
 streamlit-js-eval
+gspread
+openpyxl
+numpy

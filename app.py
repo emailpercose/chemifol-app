@@ -89,7 +89,6 @@ def upload_photo(file):
 def get_all_cantieri():
     df = get_df("cantieri")
     if not df.empty and 'attivo' in df.columns:
-        # Mostra solo quelli attivi per le nuove assegnazioni
         return sorted(df[df['attivo'] == 1]['nome_cantiere'].unique().tolist())
     elif not df.empty and 'nome_cantiere' in df.columns:
         return sorted(df['nome_cantiere'].unique().tolist())
@@ -113,10 +112,10 @@ else:
     st.markdown("<h1 style='text-align: center; color: #2e7d32;'>CHEMIFOL</h1>", unsafe_allow_html=True)
 
 # ==============================================================================
-# 3. LOGICA LOGIN (MODIFICATA PER PERSISTENZA)
+# 3. LOGICA LOGIN (CON PULSANTE RESTA COLLEGATO)
 # ==============================================================================
 
-# --- Auto-Login da Parametri URL ---
+# --- Auto-Login se c'è memoria ---
 if st.session_state.user is None:
     qp = st.query_params
     if "u_persist" in qp:
@@ -137,13 +136,19 @@ if not st.session_state.user:
         with st.form("login_frm"):
             u = st.text_input("Username").strip().lower()
             p = st.text_input("Password", type="password").strip()
+            # MODIFICA: Checkbox Resta Collegato
+            resta_collegato = st.checkbox("Resta collegato (accesso rapido)")
+            
             if st.form_submit_button("ENTRA"):
                 try:
                     res = supabase.table("users").select("*").eq("username", u).eq("password", p).execute()
                     if res.data:
                         st.session_state.user = res.data[0]
-                        # Salva sessione in URL
-                        st.query_params["u_persist"] = u
+                        # SE SCELTO, SALVA NELL'URL
+                        if resta_collegato:
+                            st.query_params["u_persist"] = u
+                        else:
+                            st.query_params.clear()
                         st.rerun()
                     else:
                         st.error("Credenziali errate.")
@@ -174,7 +179,7 @@ else:
                 
                 if success:
                     st.session_state.user = None
-                    st.query_params.clear() # Pulisce per sicurezza
+                    st.query_params.clear()
                     st.success("Fatto! Ricarica..."); time.sleep(1); st.rerun()
         st.markdown("</div>", unsafe_allow_html=True)
         st.stop()
@@ -361,10 +366,7 @@ else:
                 if c_del != "..." and st.button("ELIMINA CANTIERE"):
                     success = False
                     try:
-                        # MODIFICA: Invece di DELETE, facciamo UPDATE attivo = 0
-                        # Così rimane nello storico dei Logs
                         supabase.table("cantieri").update({"attivo": 0}).eq("nome_cantiere", c_del).execute()
-                        # Rimuoviamo solo l'assegnazione futura
                         supabase.table("assignments").delete().eq("location", c_del).execute()
                         success = True
                     except: st.error("Errore eliminazione")

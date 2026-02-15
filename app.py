@@ -138,8 +138,9 @@ if not st.session_state.user:
 else:
     user = st.session_state.user
     u_curr = user['username']
-    # FORZATURA NOME: Se l'utente è mimmo, scriviamo Mimmo
-    name_display = "Mimmo" if u_curr == 'mimmo' else user['nome_completo']
+    # --- CORREZIONE NOME ADMIN ---
+    name_display = "Mimmo Folda" if u_curr == 'mimmo' else user['nome_completo']
+    # -----------------------------
     role_curr = user['role']
     
     if role_curr == 'user' and user.get('pwd_changed') == 0:
@@ -235,7 +236,7 @@ else:
                         try:
                             supabase.table("bacheca").delete().eq("id", a['id']).execute()
                             st.rerun()
-                        except: st.rerun() # Ignora falsi errori
+                        except: st.rerun()
             st.markdown("</div>", unsafe_allow_html=True)
 
         elif choice == m_mat:
@@ -690,3 +691,4 @@ else:
                 st.markdown("</div>", unsafe_allow_html=True)
 
 # --- FINE PROGRAMMA ---
+

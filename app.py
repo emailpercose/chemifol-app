@@ -89,6 +89,7 @@ def upload_photo(file):
 def get_all_cantieri():
     df = get_df("cantieri")
     if not df.empty and 'attivo' in df.columns:
+        # Mostra solo quelli attivi per le nuove assegnazioni
         return sorted(df[df['attivo'] == 1]['nome_cantiere'].unique().tolist())
     elif not df.empty and 'nome_cantiere' in df.columns:
         return sorted(df['nome_cantiere'].unique().tolist())
@@ -112,8 +113,21 @@ else:
     st.markdown("<h1 style='text-align: center; color: #2e7d32;'>CHEMIFOL</h1>", unsafe_allow_html=True)
 
 # ==============================================================================
-# 3. LOGICA LOGIN
+# 3. LOGICA LOGIN (MODIFICATA PER PERSISTENZA)
 # ==============================================================================
+
+# --- Auto-Login da Parametri URL ---
+if st.session_state.user is None:
+    qp = st.query_params
+    if "u_persist" in qp:
+        u_saved = qp["u_persist"]
+        try:
+            res = supabase.table("users").select("*").eq("username", u_saved).execute()
+            if res.data:
+                st.session_state.user = res.data[0]
+                st.rerun()
+        except:
+            pass
 
 if not st.session_state.user:
     col1, col2, col3 = st.columns([1, 2, 1])
@@ -128,6 +142,8 @@ if not st.session_state.user:
                     res = supabase.table("users").select("*").eq("username", u).eq("password", p).execute()
                     if res.data:
                         st.session_state.user = res.data[0]
+                        # Salva sessione in URL
+                        st.query_params["u_persist"] = u
                         st.rerun()
                     else:
                         st.error("Credenziali errate.")
@@ -138,9 +154,7 @@ if not st.session_state.user:
 else:
     user = st.session_state.user
     u_curr = user['username']
-    # --- CORREZIONE NOME ADMIN ---
     name_display = "Mimmo Folda" if u_curr == 'mimmo' else user['nome_completo']
-    # -----------------------------
     role_curr = user['role']
     
     if role_curr == 'user' and user.get('pwd_changed') == 0:
@@ -160,6 +174,7 @@ else:
                 
                 if success:
                     st.session_state.user = None
+                    st.query_params.clear() # Pulisce per sicurezza
                     st.success("Fatto! Ricarica..."); time.sleep(1); st.rerun()
         st.markdown("</div>", unsafe_allow_html=True)
         st.stop()
@@ -192,7 +207,10 @@ else:
 
             choice = st.radio("Navigazione:", [m_bach, m_mat, m_gest, m_seg, m_map, m_rep, m_cal, m_sec])
             st.divider()
-            if st.button("Esci"): st.session_state.user = None; st.rerun()
+            if st.button("Esci"): 
+                st.session_state.user = None
+                st.query_params.clear() # Cancella persistenza
+                st.rerun()
 
         if st.session_state.msg_feedback:
             st.success(st.session_state.msg_feedback); st.session_state.msg_feedback = None
@@ -339,17 +357,20 @@ else:
                 st.dataframe(get_df("cantieri"), use_container_width=True)
                 st.divider()
                 
-                c_del = st.selectbox("Cantiere da eliminare", ["..."] + get_all_cantieri())
+                c_del = st.selectbox("Cantiere da eliminare (Soft Delete)", ["..."] + get_all_cantieri())
                 if c_del != "..." and st.button("ELIMINA CANTIERE"):
                     success = False
                     try:
-                        supabase.table("cantieri").delete().eq("nome_cantiere", c_del).execute()
+                        # MODIFICA: Invece di DELETE, facciamo UPDATE attivo = 0
+                        # Così rimane nello storico dei Logs
+                        supabase.table("cantieri").update({"attivo": 0}).eq("nome_cantiere", c_del).execute()
+                        # Rimuoviamo solo l'assegnazione futura
                         supabase.table("assignments").delete().eq("location", c_del).execute()
                         success = True
                     except: st.error("Errore eliminazione")
                     
                     if success:
-                        st.success("Eliminato."); time.sleep(1); st.rerun()
+                        st.success("Eliminato (Archiviato)."); time.sleep(1); st.rerun()
                 st.markdown("</div>", unsafe_allow_html=True)
 
             with tab_ass:
@@ -549,7 +570,10 @@ else:
             st.markdown(f"### Ciao, {name_display}")
             menu_emp = st.radio("Vai a:", ["📢 Bacheca", "📦 Richiesta Materiale", "📍 Timbratore"])
             st.divider()
-            if st.button("Logout"): st.session_state.user = None; st.rerun()
+            if st.button("Logout"): 
+                st.session_state.user = None
+                st.query_params.clear()
+                st.rerun()
 
         if menu_emp == "📢 Bacheca":
             st.title("📢 Bacheca Comunicazioni")
@@ -641,8 +665,11 @@ else:
                 
                 st.divider()
                 st.markdown("### ⚠️ Segnala Problema")
-                with st.expander("Apri modulo segnalazione"):
-                    d = st.text_area("Descrizione")
+                # MODIFICA RICHIESTA: Checkbox per mostrare segnalazione
+                segnala_flag = st.checkbox("Vuoi segnalare qualche problema?")
+                
+                if segnala_flag:
+                    d = st.text_area("Descrizione Problema")
                     img_file = st.camera_input("Scatta una foto")
                     if st.button("INVIA SEGNALAZIONE"):
                         if d or img_file:
@@ -691,4 +718,3 @@ else:
                 st.markdown("</div>", unsafe_allow_html=True)
 
 # --- FINE PROGRAMMA ---
-
